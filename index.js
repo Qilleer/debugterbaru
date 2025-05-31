@@ -74,33 +74,45 @@ bot.on('callback_query', async (query) => {
   }
   
   try {
-    // Route callbacks to appropriate handlers
-    if (data.startsWith('login') || data.startsWith('cancel_login') || data.startsWith('logout')) {
+    console.log(`[DEBUG] Callback data received: ${data} from user ${userId}`);
+    
+    // CTC HANDLER PRIORITAS PERTAMA - INI YANG PENTING!
+    if (data === 'add_ctc' || 
+        data === 'add_ctc_chat' || 
+        data === 'add_ctc_file' ||
+        data === 'confirm_ctc_numbers' ||
+        data === 'search_ctc_groups' ||
+        data === 'finish_ctc_group_selection' ||
+        data === 'confirm_add_ctc' ||
+        data === 'cancel_ctc_flow' ||
+        data.startsWith('toggle_ctc_group_') || 
+        data.startsWith('ctc_groups_page_')) {
+      console.log(`[DEBUG] Routing to CTC handler: ${data}`);
+      await handleCtcCallbacks(query, bot, userStates);
+    }
+    // AUTH HANDLER
+    else if (data.startsWith('login') || data.startsWith('cancel_login') || data.startsWith('logout') || 
+             data === 'auto_accept' || data === 'toggle_auto_accept' || data === 'status') {
       await handleAuthCallbacks(query, bot, userStates);
     }
+    // ADMIN HANDLER
     else if (data.startsWith('admin_') || data.startsWith('add_promote') || data.startsWith('demote_') || 
              data.startsWith('toggle_group_') || data.startsWith('groups_page_') || data.startsWith('search_') ||
              data.startsWith('finish_') || data.startsWith('confirm_') || data.startsWith('cancel_admin') ||
              data.startsWith('start_search') || data.startsWith('toggle_demote')) {
       await handleAdminCallbacks(query, bot, userStates);
     }
+    // GROUP HANDLER
     else if (data.startsWith('rename_') || data.startsWith('select_base_') || data.startsWith('confirm_rename')) {
       await handleGroupCallbacks(query, bot, userStates);
     }
-    // Handler baru untuk CTC
-    else if (data.startsWith('add_ctc') || data.startsWith('ctc_') || data.startsWith('toggle_ctc_') || 
-             data.includes('ctc') || data.startsWith('search_ctc') || data.startsWith('finish_ctc') ||
-             data.startsWith('cancel_ctc') || data === 'confirm_ctc_numbers') {
-      await handleCtcCallbacks(query, bot, userStates);
-    }
+    // MAIN MENU
     else if (data === 'main_menu') {
       await showMainMenu(chatId, bot, userStates, query.message.message_id);
     }
-    else if (data === 'auto_accept' || data === 'toggle_auto_accept') {
-      await handleAuthCallbacks(query, bot, userStates);
-    }
-    else if (data === 'status') {
-      await handleAuthCallbacks(query, bot, userStates);
+    else {
+      console.log(`[DEBUG] Unhandled callback data: ${data}`);
+      await bot.sendMessage(chatId, '❌ Command tidak dikenal. Coba lagi ya!');
     }
     
   } catch (err) {
