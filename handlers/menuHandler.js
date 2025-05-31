@@ -10,6 +10,7 @@ async function showMainMenu(chatId, bot, userStates, messageId = null) {
       [{ text: '🔑 Login WhatsApp', callback_data: 'login' }],
       [{ text: '🤖 Auto Accept Settings', callback_data: 'auto_accept' }],
       [{ text: '👥 Admin Management', callback_data: 'admin_management' }],
+      [{ text: '📞 Add CTC', callback_data: 'add_ctc' }], // Button baru
       [{ text: '✏️ Rename Groups', callback_data: 'rename_groups' }],
       [{ text: '🔄 Status', callback_data: 'status' }],
       [{ text: '🚪 Logout', callback_data: 'logout' }]
@@ -53,7 +54,32 @@ async function showAdminManagementMenu(chatId, bot, messageId = null) {
   }
 }
 
+// Show Add CTC Menu - BARU
+async function showAddCtcMenu(chatId, bot, messageId = null) {
+  const menuText = `📞 *Add Contact to Groups*\n\nPilih cara input nomor contact:`;
+  const keyboard = {
+    inline_keyboard: [
+      [{ text: '📝 Lewat Chat', callback_data: 'add_ctc_chat' }],
+      [{ text: '📄 Lewat File TXT', callback_data: 'add_ctc_file' }],
+      [{ text: '🏠 Menu Utama', callback_data: 'main_menu' }]
+    ]
+  };
+  
+  if (messageId) {
+    await safeEditMessage(bot, chatId, messageId, menuText, {
+      parse_mode: 'Markdown',
+      reply_markup: keyboard
+    });
+  } else {
+    await bot.sendMessage(chatId, menuText, {
+      parse_mode: 'Markdown',
+      reply_markup: keyboard
+    });
+  }
+}
+
 module.exports = {
   showMainMenu,
-  showAdminManagementMenu
+  showAdminManagementMenu,
+  showAddCtcMenu // Export function baru
 };
