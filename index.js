@@ -3,8 +3,9 @@ const { restoreAllSessions } = require('./whatsappClient');
 const { handleAuthCallbacks, handleAuthMessages } = require('./handlers/authHandler');
 const { handleAdminCallbacks, handleAdminMessages } = require('./handlers/adminHandler');
 const { handleGroupCallbacks, handleGroupMessages } = require('./handlers/groupHandler');
+const { handleCtcCallbacks, handleCtcMessages } = require('./handlers/ctcHandler'); // Import CTC handler
 const { showMainMenu } = require('./handlers/menuHandler');
-const { isOwner } = require('./utils/helpers');
+const { isOwner, parsePhoneNumbersFromFile } = require('./utils/helpers');
 const config = require('./config');
 
 // Bot instance & user states
@@ -86,6 +87,12 @@ bot.on('callback_query', async (query) => {
     else if (data.startsWith('rename_') || data.startsWith('select_base_') || data.startsWith('confirm_rename')) {
       await handleGroupCallbacks(query, bot, userStates);
     }
+    // Handler baru untuk CTC
+    else if (data.startsWith('add_ctc') || data.startsWith('ctc_') || data.startsWith('toggle_ctc_') || 
+             data.includes('ctc') || data.startsWith('search_ctc') || data.startsWith('finish_ctc') ||
+             data.startsWith('cancel_ctc') || data === 'confirm_ctc_numbers') {
+      await handleCtcCallbacks(query, bot, userStates);
+    }
     else if (data === 'main_menu') {
       await showMainMenu(chatId, bot, userStates, query.message.message_id);
     }
@@ -139,6 +146,11 @@ bot.on('message', async (msg) => {
       handled = await handleGroupMessages(msg, bot, userStates);
     }
     
+    // If not handled by group, try CTC handler
+    if (!handled) {
+      handled = await handleCtcMessages(msg, bot, userStates);
+    }
+    
     // If no handler processed it, ignore
     if (!handled) {
       console.log(`[DEBUG] Unhandled message from ${userId}: ${text}`);
@@ -151,6 +163,78 @@ bot.on('message', async (msg) => {
     } catch (sendErr) {
       console.error('Failed to send error message:', sendErr.message);
     }
+  }
+});
+
+// Handle document uploads untuk file TXT
+bot.on('document', async (msg) => {
+  const chatId = msg.chat.id;
+  const userId = msg.from.id;
+  const document = msg.document;
+  
+  if (!isOwner(userId)) return;
+  
+  // Check if user is in CTC flow waiting for file
+  if (!userStates[userId]?.ctcFlow || userStates[userId].ctcFlow.step !== 'waiting_file') {
+    return;
+  }
+  
+  try {
+    // Validate file type
+    if (!document.file_name.toLowerCase().endsWith('.txt')) {
+      await bot.sendMessage(chatId, '❌ File harus berformat .txt!');
+      return;
+    }
+    
+    // Validate file size (max 5MB)
+    if (document.file_size > 5 * 1024 * 1024) {
+      await bot.sendMessage(chatId, '❌ File terlalu besar! Maksimal 5MB.');
+      return;
+    }
+    
+    const loadingMsg = await bot.sendMessage(chatId, '⏳ Memproses file...');
+    
+    // Download file
+    const fileLink = await bot.getFileLink(document.file_id);
+    const response = await fetch(fileLink);
+    const fileContent = await response.text();
+    
+    // Parse phone numbers from file
+    const { phoneNumbers, errors } = parsePhoneNumbersFromFile(fileContent);
+    
+    if (errors.length > 0) {
+      await bot.editMessageText(
+        `❌ Ada error dalam file:\n\n${errors.slice(0, 10).join('\n')}${errors.length > 10 ? `\n... dan ${errors.length - 10} error lainnya` : ''}`,
+        {
+          chat_id: chatId,
+          message_id: loadingMsg.message_id
+        }
+      );
+      return;
+    }
+    
+    if (phoneNumbers.length === 0) {
+      await bot.editMessageText('❌ Tidak ada nomor valid yang ditemukan dalam file!', {
+        chat_id: chatId,
+        message_id: loadingMsg.message_id
+      });
+      return;
+    }
+    
+    // Store parsed numbers
+    userStates[userId].ctcFlow.contactNumbers = phoneNumbers;
+    userStates[userId].ctcFlow.step = 'confirm_numbers';
+    
+    // Delete loading message
+    await bot.deleteMessage(chatId, loadingMsg.message_id);
+    
+    // Show confirmation
+    const { showConfirmCtcNumbers } = require('./handlers/ctcHandler');
+    await showConfirmCtcNumbers(chatId, userId, bot, userStates);
+    
+  } catch (err) {
+    console.error('Error processing file:', err);
+    await bot.sendMessage(chatId, '❌ Error memproses file. Coba lagi ya!');
   }
 });
 
