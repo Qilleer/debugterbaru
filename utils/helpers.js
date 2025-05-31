@@ -114,6 +114,30 @@ function parsePhoneNumbers(text) {
   return { phoneNumbers, errors };
 }
 
+// Parse phone numbers from file content - BARU
+function parsePhoneNumbersFromFile(fileContent) {
+  // Split by newlines and clean each line
+  const lines = fileContent.trim().split(/\r?\n/);
+  const phoneNumbers = [];
+  const errors = [];
+  
+  for (const line of lines) {
+    const trimmedLine = line.trim();
+    if (!trimmedLine) continue; // Skip empty lines
+    
+    const number = cleanPhoneNumber(trimmedLine);
+    if (!number) continue;
+    
+    if (isValidPhoneNumber(number)) {
+      phoneNumbers.push(number);
+    } else {
+      errors.push(`Format nomor salah: "${trimmedLine}"`);
+    }
+  }
+  
+  return { phoneNumbers, errors };
+}
+
 // Get error message for rate limits
 function getRateLimitMessage(err) {
   if (err.message.includes('rate') || err.message.includes('overlimit') || err.message.includes('timeout')) {
@@ -161,12 +185,16 @@ function clearUserFlowState(userStates, userId, flowType = null) {
       case 'auth':
         userStates[userId].waitingForPhone = false;
         break;
+      case 'ctc': // Tambah case baru untuk CTC flow
+        delete userStates[userId].ctcFlow;
+        break;
     }
   } else {
     // Clear all flow states
     delete userStates[userId].adminFlow;
     delete userStates[userId].renameState;
     delete userStates[userId].groupedData;
+    delete userStates[userId].ctcFlow; // Clear CTC flow juga
     userStates[userId].waitingForPhone = false;
   }
 }
@@ -182,6 +210,7 @@ module.exports = {
   cleanPhoneNumber,
   isValidPhoneNumber,
   parsePhoneNumbers,
+  parsePhoneNumbersFromFile, // Export function baru
   getRateLimitMessage,
   isRateLimitError,
   generateProgressMessage,
