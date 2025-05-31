@@ -21,48 +21,65 @@ async function handleCtcCallbacks(query, bot, userStates) {
   const userId = query.from.id;
   const data = query.data;
   
+  console.log(`[DEBUG][CTC] Callback received: ${data} from user ${userId}`);
+  
   try {
     switch(true) {
       case data === 'add_ctc':
+        console.log(`[DEBUG][CTC] Showing add CTC menu`);
         await showAddCtcMenu(chatId, bot, query.message.message_id);
         break;
         
       case data === 'add_ctc_chat':
+        console.log(`[DEBUG][CTC] Starting add CTC via chat`);
         await handleAddCtcChat(chatId, userId, bot, userStates);
         break;
         
       case data === 'add_ctc_file':
+        console.log(`[DEBUG][CTC] Starting add CTC via file`);
         await handleAddCtcFile(chatId, userId, bot, userStates);
         break;
         
       case data === 'confirm_ctc_numbers':
+        console.log(`[DEBUG][CTC] Confirming CTC numbers - user state:`, userStates[userId]?.ctcFlow?.step);
         await handleConfirmCtcNumbers(chatId, userId, bot, userStates);
         break;
         
       case data === 'search_ctc_groups':
+        console.log(`[DEBUG][CTC] Searching CTC groups`);
         await handleSearchCtcGroups(chatId, userId, bot, userStates);
         break;
         
       case data === 'finish_ctc_group_selection':
+        console.log(`[DEBUG][CTC] Finishing CTC group selection`);
         await handleFinishCtcGroupSelection(chatId, userId, bot, userStates);
         break;
         
       case data === 'confirm_add_ctc':
+        console.log(`[DEBUG][CTC] Confirming add CTC`);
         await handleConfirmAddCtc(chatId, userId, bot, userStates);
         break;
         
       case data === 'cancel_ctc_flow':
+        console.log(`[DEBUG][CTC] Canceling CTC flow`);
         await handleCancelCtcFlow(chatId, userId, bot, userStates);
         break;
         
       case data.startsWith('toggle_ctc_group_'):
         const groupId = data.replace('toggle_ctc_group_', '');
+        console.log(`[DEBUG][CTC] Toggling group selection: ${groupId}`);
         await handleToggleCtcGroupSelection(chatId, userId, groupId, bot, userStates, query.message.message_id);
         break;
         
       case data.startsWith('ctc_groups_page_'):
         const page = parseInt(data.replace('ctc_groups_page_', ''));
+        console.log(`[DEBUG][CTC] Navigating to page: ${page}`);
         await handleCtcGroupsPage(chatId, userId, page, bot, userStates, query.message.message_id);
+        break;
+        
+      default:
+        console.log(`[DEBUG][CTC] Unhandled callback: ${data}`);
+        await bot.sendMessage(chatId, '❌ Command CTC tidak dikenal.');
         break;
     }
   } catch (err) {
@@ -80,6 +97,8 @@ async function handleCtcMessages(msg, bot, userStates) {
   // Handle CTC flow input
   if (userStates[userId]?.ctcFlow) {
     const state = userStates[userId].ctcFlow;
+    
+    console.log(`[DEBUG][CTC] Message received in step: ${state.step}, text: ${text}`);
     
     if (state.step === 'waiting_search_query') {
       // Delete user's message
@@ -114,6 +133,7 @@ async function handleCtcMessages(msg, bot, userStates) {
       state.contactNumbers = phoneNumbers;
       state.step = 'confirm_numbers';
       
+      console.log(`[DEBUG][CTC] Numbers parsed, showing confirmation. Numbers: ${phoneNumbers.length}`);
       await showConfirmCtcNumbers(chatId, userId, bot, userStates);
       return true;
     }
@@ -140,6 +160,8 @@ async function handleAddCtcChat(chatId, userId, bot, userStates) {
     searchQuery: '',
     groups: []
   };
+  
+  console.log(`[DEBUG][CTC] Initialized chat flow for user ${userId}`);
   
   const message = `📝 *Input Nomor Contact*\n\n`;
   const instructions = `💬 Ketik nomor contact yang mau di-add ke grup:\n\n`;
@@ -174,6 +196,8 @@ async function handleAddCtcFile(chatId, userId, bot, userStates) {
     groups: []
   };
   
+  console.log(`[DEBUG][CTC] Initialized file flow for user ${userId}`);
+  
   const message = `📄 *Upload File TXT*\n\n`;
   const instructions = `📤 Upload file .txt yang berisi nomor contact:\n\n`;
   const format = `**Format dalam file:**\n62812345\n6213456\n62987654\n\n*(Satu nomor per baris, tanpa + atau spasi)*`;
@@ -191,6 +215,14 @@ async function handleAddCtcFile(chatId, userId, bot, userStates) {
 // Show confirm CTC numbers - EXPORT FUNCTION
 async function showConfirmCtcNumbers(chatId, userId, bot, userStates) {
   const state = userStates[userId].ctcFlow;
+  
+  if (!state || !state.contactNumbers || state.contactNumbers.length === 0) {
+    console.log(`[DEBUG][CTC] No valid state or numbers for confirmation`);
+    await bot.sendMessage(chatId, '❌ Tidak ada nomor contact yang valid!');
+    return;
+  }
+  
+  console.log(`[DEBUG][CTC] Showing confirmation for ${state.contactNumbers.length} numbers`);
   
   let message = `✅ *Nomor Contact Berhasil Diparse*\n\n`;
   message += `📊 Total: ${state.contactNumbers.length} nomor\n\n`;
@@ -221,7 +253,10 @@ async function showConfirmCtcNumbers(chatId, userId, bot, userStates) {
 async function handleConfirmCtcNumbers(chatId, userId, bot, userStates) {
   const state = userStates[userId].ctcFlow;
   
-  if (!state || state.contactNumbers.length === 0) {
+  console.log(`[DEBUG][CTC] Handling confirm CTC numbers. State:`, state);
+  
+  if (!state || !state.contactNumbers || state.contactNumbers.length === 0) {
+    console.log(`[DEBUG][CTC] No valid numbers to confirm`);
     await bot.sendMessage(chatId, '❌ Tidak ada nomor contact yang valid!');
     return;
   }
@@ -241,6 +276,8 @@ async function handleConfirmCtcNumbers(chatId, userId, bot, userStates) {
       });
       return;
     }
+    
+    console.log(`[DEBUG][CTC] Found ${groups.length} groups, updating state`);
     
     state.groups = groups;
     state.step = 'select_groups';
@@ -263,6 +300,8 @@ async function handleConfirmCtcNumbers(chatId, userId, bot, userStates) {
 async function showCtcGroupsList(chatId, userId, bot, userStates, messageId) {
   const state = userStates[userId].ctcFlow;
   const groupsPerPage = 8;
+  
+  console.log(`[DEBUG][CTC] Showing groups list. State step: ${state.step}, Groups: ${state.groups.length}`);
   
   // Filter groups by search query
   let filteredGroups = state.groups;
@@ -331,13 +370,18 @@ async function showCtcGroupsList(chatId, userId, bot, userStates, messageId) {
 async function handleToggleCtcGroupSelection(chatId, userId, groupId, bot, userStates, messageId) {
   const state = userStates[userId].ctcFlow;
   
-  if (!state || state.step !== 'select_groups') return;
+  if (!state || state.step !== 'select_groups') {
+    console.log(`[DEBUG][CTC] Invalid state for group toggle. Step: ${state?.step}`);
+    return;
+  }
   
   const index = state.selectedGroups.indexOf(groupId);
   if (index > -1) {
     state.selectedGroups.splice(index, 1);
+    console.log(`[DEBUG][CTC] Removed group ${groupId} from selection`);
   } else {
     state.selectedGroups.push(groupId);
+    console.log(`[DEBUG][CTC] Added group ${groupId} to selection`);
   }
   
   await showCtcGroupsList(chatId, userId, bot, userStates, messageId);
@@ -347,7 +391,10 @@ async function handleToggleCtcGroupSelection(chatId, userId, groupId, bot, userS
 async function handleCtcGroupsPage(chatId, userId, page, bot, userStates, messageId) {
   const state = userStates[userId].ctcFlow;
   
-  if (!state || state.step !== 'select_groups') return;
+  if (!state || state.step !== 'select_groups') {
+    console.log(`[DEBUG][CTC] Invalid state for page navigation. Step: ${state?.step}`);
+    return;
+  }
   
   state.currentPage = page;
   await showCtcGroupsList(chatId, userId, bot, userStates, messageId);
@@ -357,7 +404,10 @@ async function handleCtcGroupsPage(chatId, userId, page, bot, userStates, messag
 async function handleSearchCtcGroups(chatId, userId, bot, userStates) {
   const state = userStates[userId].ctcFlow;
   
-  if (!state || state.step !== 'select_groups') return;
+  if (!state || state.step !== 'select_groups') {
+    console.log(`[DEBUG][CTC] Invalid state for search. Step: ${state?.step}`);
+    return;
+  }
   
   state.step = 'waiting_search_query';
   
@@ -375,7 +425,11 @@ async function handleSearchCtcGroups(chatId, userId, bot, userStates) {
 async function handleFinishCtcGroupSelection(chatId, userId, bot, userStates) {
   const state = userStates[userId].ctcFlow;
   
-  if (!state || state.selectedGroups.length === 0) return;
+  if (!state || state.selectedGroups.length === 0) {
+    console.log(`[DEBUG][CTC] No groups selected`);
+    await bot.sendMessage(chatId, '❌ Pilih minimal 1 grup dulu!');
+    return;
+  }
   
   const selectedGroupNames = state.selectedGroups.map(groupId => {
     const group = state.groups.find(g => g.id === groupId);
@@ -416,7 +470,11 @@ async function handleFinishCtcGroupSelection(chatId, userId, bot, userStates) {
 async function handleConfirmAddCtc(chatId, userId, bot, userStates) {
   const state = userStates[userId].ctcFlow;
   
-  if (!state || state.selectedGroups.length === 0 || state.contactNumbers.length === 0) return;
+  if (!state || state.selectedGroups.length === 0 || state.contactNumbers.length === 0) {
+    console.log(`[DEBUG][CTC] Invalid state for confirm add`);
+    await bot.sendMessage(chatId, '❌ Data tidak lengkap. Mulai lagi ya!');
+    return;
+  }
   
   const loadingMsg = await bot.sendMessage(chatId, '⏳ Memulai proses add contact...');
   
