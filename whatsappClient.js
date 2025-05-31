@@ -13,6 +13,65 @@ function getUserStates() {
 const reconnectAttempts = {};
 const MAX_RECONNECT_ATTEMPTS = 3;
 
+// Helper function to check if bot is admin in group - IMPROVED
+function isBotAdminInGroup(groupMetadata, botJid, botLid) {
+  if (!groupMetadata || !groupMetadata.participants) {
+    return false;
+  }
+  
+  // Extract bot number from JID (handle both formats)
+  const botNumber = botJid.split('@')[0].split(':')[0];
+  const botLidNumber = botLid ? botLid.split('@')[0].split(':')[0] : null;
+  
+  console.log(`[DEBUG] Checking admin status:`);
+  console.log(`[DEBUG] - Bot JID: ${botJid}`);
+  console.log(`[DEBUG] - Bot LID: ${botLid}`);
+  console.log(`[DEBUG] - Bot numbers: ${botNumber}, ${botLidNumber}`);
+  console.log(`[DEBUG] - All participants:`, groupMetadata.participants.map(p => `${p.id} (${p.admin || 'member'})`));
+  
+  const isAdmin = groupMetadata.participants.some(p => {
+    // Must have admin role first
+    const hasAdminRole = p.admin === 'admin' || p.admin === 'superadmin';
+    if (!hasAdminRole) return false;
+    
+    // Extract participant number
+    const participantNumber = p.id.split('@')[0].split(':')[0];
+    
+    console.log(`[DEBUG] Checking admin participant: ${p.id} (${p.admin}) - number: ${participantNumber}`);
+    
+    // Multiple ways to match:
+    // 1. Exact JID match
+    if (p.id === botJid) {
+      console.log(`[DEBUG] ✅ Matched via exact JID: ${p.id} === ${botJid}`);
+      return true;
+    }
+    
+    // 2. Exact LID match
+    if (botLid && p.id === botLid) {
+      console.log(`[DEBUG] ✅ Matched via exact LID: ${p.id} === ${botLid}`);
+      return true;
+    }
+    
+    // 3. Number match from JID
+    if (botNumber === participantNumber) {
+      console.log(`[DEBUG] ✅ Matched via number from JID: ${botNumber} === ${participantNumber}`);
+      return true;
+    }
+    
+    // 4. Number match from LID
+    if (botLidNumber && botLidNumber === participantNumber) {
+      console.log(`[DEBUG] ✅ Matched via number from LID: ${botLidNumber} === ${participantNumber}`);
+      return true;
+    }
+    
+    console.log(`[DEBUG] ❌ No match for ${p.id}`);
+    return false;
+  });
+  
+  console.log(`[DEBUG] Final admin check result: ${isAdmin}`);
+  return isAdmin;
+}
+
 // Get all groups from WhatsApp
 async function getAllGroups(userId) {
   const userStates = getUserStates();
@@ -35,28 +94,14 @@ async function getAllGroups(userId) {
       
       // Only include groups where bot is participant
       if (group.participants && group.participants.length > 0) {
+        const botJid = sock.user.id;
+        const botLid = sock.user.lid;
+        
         groupList.push({
           id: groupId,
           name: group.subject || 'Unnamed Group',
           participantCount: group.participants.length,
-          isAdmin: group.participants.some(p => {
-            const botJid = sock.user.id;
-            const botLid = sock.user.lid;
-            
-            // Check if participant has admin role
-            const hasAdminRole = p.admin === 'admin' || p.admin === 'superadmin';
-            if (!hasAdminRole) return false;
-            
-            // Try exact match with JID or number-only match
-            const botNumber = botJid.split('@')[0].split(':')[0];
-            const botLidNumber = botLid ? botLid.split('@')[0].split(':')[0] : null;
-            const participantNumber = p.id.split('@')[0].split(':')[0];
-            
-            return p.id === botJid || 
-                   (botLid && p.id === botLid) ||
-                   botNumber === participantNumber ||
-                   (botLidNumber && botLidNumber === participantNumber);
-          })
+          isAdmin: isBotAdminInGroup(group, botJid, botLid)
         });
       }
     }
@@ -147,7 +192,7 @@ async function isParticipantInGroup(userId, groupId, participantNumber) {
   }
 }
 
-// Add participant to group
+// Add participant to group - UPDATED WITH FLEXIBLE LOGIC
 async function addParticipantToGroup(userId, groupId, participantNumber) {
   const userStates = getUserStates();
   
@@ -163,27 +208,28 @@ async function addParticipantToGroup(userId, groupId, participantNumber) {
     // Prepare participant JID
     const participantJid = `${participantNumber}@s.whatsapp.net`;
     
-    // Check if bot is admin first
+    // Get group metadata to check admin status
     const groupMetadata = await sock.groupMetadata(groupId);
     const botJid = sock.user.id;
     const botLid = sock.user.lid;
     
-    const isAdmin = groupMetadata.participants.some(p => {
-      const hasAdminRole = p.admin === 'admin' || p.admin === 'superadmin';
-      if (!hasAdminRole) return false;
-      
-      const botNumber = botJid.split('@')[0].split(':')[0];
-      const botLidNumber = botLid ? botLid.split('@')[0].split(':')[0] : null;
-      const participantNumberFromJid = p.id.split('@')[0].split(':')[0];
-      
-      return p.id === botJid || 
-             (botLid && p.id === botLid) ||
-             botNumber === participantNumberFromJid ||
-             (botLidNumber && botLidNumber === participantNumberFromJid);
-    });
+    // Check if bot is admin using improved logic
+    const isAdmin = isBotAdminInGroup(groupMetadata, botJid, botLid);
+    
+    console.log(`[DEBUG][${userId}] Group memberAddMode: ${groupMetadata.memberAddMode}`);
+    console.log(`[DEBUG][${userId}] Bot admin status: ${isAdmin}`);
     
     if (!isAdmin) {
-      throw new Error('Bot bukan admin di grup ini');
+      // Check if group allows members to add others
+      const canMembersAdd = groupMetadata.memberAddMode === true; // explicitly check for true
+      
+      if (!canMembersAdd) {
+        throw new Error('Bot bukan admin dan grup tidak mengizinkan member menambah participant');
+      } else {
+        console.log(`[DEBUG][${userId}] Bot bukan admin tapi grup mengizinkan member menambah participant`);
+      }
+    } else {
+      console.log(`[DEBUG][${userId}] Bot adalah admin, dapat menambah participant`);
     }
     
     // Add participant with timeout
@@ -235,7 +281,7 @@ function getAddParticipantErrorMessage(statusCode) {
   return errorMessages[statusCode] || 'Error tidak dikenal';
 }
 
-// Promote participant to admin
+// Promote participant to admin - UPDATED
 async function promoteParticipant(userId, groupId, participantNumber) {
   const userStates = getUserStates();
   
@@ -248,24 +294,13 @@ async function promoteParticipant(userId, groupId, participantNumber) {
     
     console.log(`[DEBUG][${userId}] Promoting ${participantNumber} to admin in group ${groupId}`);
     
-    // Check if bot is admin first
+    // Get group metadata
     const groupMetadata = await sock.groupMetadata(groupId);
     const botJid = sock.user.id;
     const botLid = sock.user.lid;
     
-    const isAdmin = groupMetadata.participants.some(p => {
-      const hasAdminRole = p.admin === 'admin' || p.admin === 'superadmin';
-      if (!hasAdminRole) return false;
-      
-      const botNumber = botJid.split('@')[0].split(':')[0];
-      const botLidNumber = botLid ? botLid.split('@')[0].split(':')[0] : null;
-      const participantNumberFromJid = p.id.split('@')[0].split(':')[0];
-      
-      return p.id === botJid || 
-             (botLid && p.id === botLid) ||
-             botNumber === participantNumberFromJid ||
-             (botLidNumber && botLidNumber === participantNumberFromJid);
-    });
+    // Check if bot is admin using improved logic
+    const isAdmin = isBotAdminInGroup(groupMetadata, botJid, botLid);
     
     if (!isAdmin) {
       throw new Error('Bot bukan admin di grup ini');
@@ -320,7 +355,7 @@ async function promoteParticipant(userId, groupId, participantNumber) {
   }
 }
 
-// Demote participant from admin
+// Demote participant from admin - UPDATED
 async function demoteParticipant(userId, groupId, participantNumber) {
   const userStates = getUserStates();
   
@@ -336,24 +371,13 @@ async function demoteParticipant(userId, groupId, participantNumber) {
     // Prepare participant JID
     const participantJid = `${participantNumber}@s.whatsapp.net`;
     
-    // Check if bot is admin first
+    // Get group metadata
     const groupMetadata = await sock.groupMetadata(groupId);
     const botJid = sock.user.id;
     const botLid = sock.user.lid;
     
-    const isAdmin = groupMetadata.participants.some(p => {
-      const hasAdminRole = p.admin === 'admin' || p.admin === 'superadmin';
-      if (!hasAdminRole) return false;
-      
-      const botNumber = botJid.split('@')[0].split(':')[0];
-      const botLidNumber = botLid ? botLid.split('@')[0].split(':')[0] : null;
-      const participantNumberFromJid = p.id.split('@')[0].split(':')[0];
-      
-      return p.id === botJid || 
-             (botLid && p.id === botLid) ||
-             botNumber === participantNumberFromJid ||
-             (botLidNumber && botLidNumber === participantNumberFromJid);
-    });
+    // Check if bot is admin using improved logic
+    const isAdmin = isBotAdminInGroup(groupMetadata, botJid, botLid);
     
     if (!isAdmin) {
       throw new Error('Bot bukan admin di grup ini');
@@ -406,7 +430,7 @@ async function demoteParticipant(userId, groupId, participantNumber) {
   }
 }
 
-// Rename a group
+// Rename a group - UPDATED
 async function renameGroup(userId, groupId, newName) {
   const userStates = getUserStates();
   
@@ -439,27 +463,8 @@ async function renameGroup(userId, groupId, newName) {
     
     console.log(`[DEBUG][${userId}] Bot JID: ${botJid}, Bot LID: ${botLid}`);
     
-    const isAdmin = group.participants.some(p => {
-      const hasAdminRole = p.admin === 'admin' || p.admin === 'superadmin';
-      if (!hasAdminRole) return false;
-      
-      const botNumber = botJid.split('@')[0].split(':')[0];
-      const botLidNumber = botLid ? botLid.split('@')[0].split(':')[0] : null;
-      const participantNumber = p.id.split('@')[0].split(':')[0];
-      
-      const isMatch = p.id === botJid || 
-             (botLid && p.id === botLid) ||
-             botNumber === participantNumber ||
-             (botLidNumber && botLidNumber === participantNumber);
-             
-      if (isMatch) {
-        console.log(`[DEBUG][${userId}] Admin match found: ${p.id} (${p.admin})`);
-      }
-      
-      return isMatch;
-    });
-    
-    console.log(`[DEBUG][${userId}] Is admin: ${isAdmin}`);
+    // Use improved admin check
+    const isAdmin = isBotAdminInGroup(group, botJid, botLid);
     
     if (!isAdmin) {
       throw new Error('Bot bukan admin di grup ini');
@@ -504,47 +509,11 @@ async function checkPendingRequests(userId, sock) {
     for (const groupId in groups) {
       const group = groups[groupId];
       
-      // Check if bot is admin in this group
+      // Check if bot is admin in this group using improved logic
       const botJid = sock.user.id;
-      const botLid = sock.user.lid; // Get LID too
-      console.log(`[DEBUG][${userId}] Bot JID: ${botJid}`);
-      console.log(`[DEBUG][${userId}] Bot LID: ${botLid}`);
-      console.log(`[DEBUG][${userId}] Group participants:`, group.participants.map(p => `${p.id} (${p.admin || 'member'})`));
+      const botLid = sock.user.lid;
       
-      const isAdmin = group.participants.some(p => {
-        // Check if participant has admin or superadmin role
-        const hasAdminRole = p.admin === 'admin' || p.admin === 'superadmin';
-        if (!hasAdminRole) return false;
-        
-        // Try exact match with JID
-        if (p.id === botJid) {
-          console.log(`[DEBUG][${userId}] Matched via JID: ${p.id}`);
-          return true;
-        }
-        
-        // Try exact match with LID
-        if (botLid && p.id === botLid) {
-          console.log(`[DEBUG][${userId}] Matched via LID: ${p.id}`);
-          return true;
-        }
-        
-        // Try number-only match (remove domain and suffixes)
-        const botNumber = botJid.split('@')[0].split(':')[0];
-        const botLidNumber = botLid ? botLid.split('@')[0].split(':')[0] : null;
-        const participantNumber = p.id.split('@')[0].split(':')[0];
-        
-        if (botNumber === participantNumber) {
-          console.log(`[DEBUG][${userId}] Matched via number (JID): ${botNumber} === ${participantNumber}`);
-          return true;
-        }
-        
-        if (botLidNumber && botLidNumber === participantNumber) {
-          console.log(`[DEBUG][${userId}] Matched via number (LID): ${botLidNumber} === ${participantNumber}`);
-          return true;
-        }
-        
-        return false;
-      });
+      const isAdmin = isBotAdminInGroup(group, botJid, botLid);
       
       console.log(`[DEBUG][${userId}] Is admin in group ${groupId}: ${isAdmin}`);
       
